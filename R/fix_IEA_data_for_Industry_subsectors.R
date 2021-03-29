@@ -5,7 +5,7 @@
 #' industry subsectors, by their respective inputs.  
 #' The corrections done by this function are rather rudimentary and crude. This
 #' gets smoothed away in regional aggregation. But do not use the resulting 
-#' country-level data without additinonal scrutiny.
+#' country-level data without additional scrutiny.
 #' 
 #' Use regional or global averages if IEA industry data lists energy use only as
 #' "non-specified". 
@@ -89,7 +89,7 @@ fix_IEA_data_for_Industry_subsectors <- function(data, ieamatch) {
            | .data$INONSPEC == .data$TOTIND) %>%
     select(.data$iso3c, .data$region, .data$year, .data$product, .data$TOTIND)
 
-  # use all non-suspicious data to calculate reginal and global averages
+  # use all non-suspicious data to calculate regional and global averages
   data_for_fixing <- anti_join(
     data_industry %>%
       filter('TOTIND' != .data$flow),
