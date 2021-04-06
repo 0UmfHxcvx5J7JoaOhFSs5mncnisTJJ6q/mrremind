@@ -39,18 +39,19 @@
 fix_IEA_data_for_Industry_subsectors <- function(data, ieamatch) {
   
   # all industry subsector flows
-  flows_to_fix <- c('IRONSTL', 'CHEMICAL', 'NONFERR', 'NONMET', 'TRANSEQ', 
-                    'MACHINE','MINING', 'FOODPRO', 'PAPERPRO', 'WOODPRO', 
+  TOTIND_flows <- c('IRONSTL',  'CHEMICAL', 'NONFERR', 'NONMET',   'TRANSEQ', 
+                    'MACHINE',  'MINING',   'FOODPRO', 'PAPERPRO', 'WOODPRO', 
                     'CONSTRUC', 'TEXTILES')
   
   # all products associated with those flows
   products_to_fix <- ieamatch %>%
-    filter(.data$iea_flows %in% flows_to_fix) %>%
+    filter(!!sym('iea_flows') %in% TOTIND_flows) %>%
     getElement('iea_product') %>%
     unique()
 
   region_mapping <- read_delim(
-    file = toolMappingFile('regional', getConfig('regionmapping')),
+    file = toolGetMapping(name = getConfig('regionmapping'), type = 'regional', 
+                          returnPathOnly = TRUE),
     delim = ';',
     col_names = c('country', 'iso3c', 'region'),
     col_types = cols(country = col_skip(),
@@ -61,8 +62,9 @@ fix_IEA_data_for_Industry_subsectors <- function(data, ieamatch) {
   # ---- extend industry subsector time series ----
   # subset of data containing industry subsector products and flows
   data_industry <- data[,,cartesian(products_to_fix,
-                                    c(flows_to_fix, 'TOTIND', 'INONSPEC'))] %>%
+                                    c(TOTIND_flows, 'TOTIND', 'INONSPEC'))] %>%
     as.data.frame() %>%
+    as_tibble() %>% 
     select(iso3c = 'Region', year = 'Year', product = 'Data1', flow = 'Data2',
            value = 'Value') %>%
     mutate(year = as.integer(as.character(.data$year))) %>%
@@ -74,10 +76,10 @@ fix_IEA_data_for_Industry_subsectors <- function(data, ieamatch) {
   # industry are "suspicious" and are therefore fixed
   data_to_fix <- inner_join(
     data_industry %>%
-      filter('TOTIND' != .data$flow) %>%
-      group_by(.data$iso3c, .data$region, .data$year, .data$product) %>%
-      summarise(total = sum(.data$value, na.rm = TRUE)) %>%
-      ungroup(),
+      filter('TOTIND' != !!sym('flow')) %>%
+      group_by(!!sym('iso3c'), !!sym('region'), !!sym('year'), 
+               !!sym('product')) %>%
+      summarise(total = sum(!!sym('value'), na.rm = TRUE), .groups = 'drop'),
 
     data_industry %>%
       filter(.data$flow %in% c('TOTIND', 'INONSPEC')) %>%
@@ -92,46 +94,43 @@ fix_IEA_data_for_Industry_subsectors <- function(data, ieamatch) {
   # use all non-suspicious data to calculate regional and global averages
   data_for_fixing <- anti_join(
     data_industry %>%
-      filter('TOTIND' != .data$flow),
+      filter('TOTIND' != !!sym('flow')),
 
     data_to_fix %>%
-      select(-.data$TOTIND),
+      select(-'TOTIND'),
 
     c('iso3c', 'region', 'year', 'product')
   ) %>% 
-    tbl_df()
+    as_tibble()
 
   data_for_fixing <- full_join(
     # compute global averages
     data_for_fixing %>%
-      group_by(.data$year, .data$product, .data$flow) %>%
-      summarise(value = sum(.data$value)) %>%
-      ungroup() %>%   # FIXME: dplyr 0.7.4 seems unable to group again
-      group_by(.data$year, .data$product) %>%
-      mutate(global_share = .data$value / sum(.data$value)) %>%
+      group_by(!!sym('year'), !!sym('product'), !!sym('flow')) %>%
+      summarise(value = sum(!!sym('value')), .groups = 'drop_last') %>%
+      mutate(global_share = !!sym('value') / sum(!!sym('value'))) %>%
       ungroup() %>%
-      select(-.data$value) %>%
+      select(-'value') %>%
       # and expand to all regions
       mutate(region = NA_character_) %>%
-      complete(nesting_(list('year', 'product', 'flow', 'global_share')),
+      complete(nesting(!!!syms(c('year', 'product', 'flow', 'global_share'))),
                region = unique(region_mapping$region)),
 
     # compute regional averages
     data_for_fixing %>%
-      group_by(.data$year, .data$region, .data$product, .data$flow) %>%
-      summarise(value = sum(.data$value)) %>%
-      ungroup() %>%   # FIXME: dplyr 0.7.4 seems unable to group again
-      group_by(.data$year, .data$region, .data$product) %>%
-      mutate(regional_share = .data$value / sum(.data$value)) %>%
+      group_by(!!!syms(c('year', 'region', 'product', 'flow'))) %>%
+      summarise(value = sum(!!sym('value')), .groups = 'drop_last') %>%
+      mutate(regional_share = !!sym('value') / sum(!!sym('value'))) %>%
       ungroup() %>%
-      select(-.data$value),
+      select(-'value'),
 
     c('year', 'region', 'product', 'flow')
   ) %>%
     # use regional averages if available, global averages otherwise
-    mutate(value = ifelse(!is.na(.data$regional_share), .data$regional_share,
-                          .data$global_share)) %>%
-    select(-.data$regional_share, -.data$global_share) %>%
+    mutate(value = ifelse(!is.na(!!sym('regional_share')), 
+                          !!sym('regional_share'),
+                          !!sym('global_share'))) %>%
+    select(-'regional_share', -'global_share') %>%
     interpolate_missing_periods_(
       periods = list(year = sub('^y([0-9]{4})$', '\\1', getYears(data)) %>% 
                        as.integer() %>% 
@@ -145,19 +144,83 @@ fix_IEA_data_for_Industry_subsectors <- function(data, ieamatch) {
     c('region', 'year', 'product')
   ) %>%
     # replace "suspicious" data with averages
-    mutate(value = .data$TOTIND * .data$value) %>%
-    select(.data$iso3c, .data$region, .data$year, .data$product, .data$flow, 
-           .data$value) %>%
-    assert(not_na, .data$value) %>%
+    mutate(value = !!sym('TOTIND') * !!sym('value')) %>%
+    select('iso3c', 'region', 'year', 'product', 'flow', 'value') %>%
+    assert(not_na, !!sym('value')) %>%
     overwrite(data_industry) %>%
-    select(COUNTRY = .data$iso3c, TIME = .data$year, PRODUCT = .data$product, 
-           FLOW = .data$flow, Value = .data$value) %>%
+    select(COUNTRY = 'iso3c', TIME = 'year', PRODUCT = 'product', 
+           FLOW = 'flow', Value = 'value') %>%
     as.magpie()
 
   # replace fixed data
   data[getRegions(data_industry_fixed),
        getYears(data_industry_fixed),
        getNames(data_industry_fixed)] <- data_industry_fixed
+  
+  # ---- factor replacement function ----
+  calc_industry_input_factors <- function(data_trans, data) {
+    # This helper function takes a data frame with columns region, year, 
+    # product, and value.  It calculates the factors with which outputs
+    # (positive values) will be replaced by inputs (negative values) in the 
+    # IRONSTL subsector and the rest of industry (TOTIND - IRONSTL), allocating
+    # all transformation losses to IRONSTL.
+    # FIXME: industry transformation losses or **all** transformation losses?
+    
+    # net inputs and outputs, disregarding E/T flow differences
+    data_trans <- data_trans %>% 
+      group_by(!!sym('region'), !!sym('year'), !!sym('product')) %>% 
+      summarise(value = sum(!!sym('value')), .groups = 'drop') %>% 
+      character.data.frame()
+    
+    outputs_trans <- data_trans %>% 
+      filter(0 < !!sym('value')) %>% 
+      distinct(!!sym('product')) %>% 
+      pull('product')
+    
+    full_join(
+      # coke oven inputs  
+      data_trans %>% 
+        filter(0 > !!sym('value')) %>% 
+        group_by(!!sym('region'), !!sym('year'), !!sym('product')) %>% 
+        summarise(inputs = abs(sum(!!sym('value'))), .groups = 'drop'),
+      
+      # blast furnace outputs
+      data_trans %>% 
+        filter(0 < !!sym('value')) %>% 
+        group_by(!!sym('region'), !!sym('year')) %>% 
+        summarise(outputs = sum(!!sym('value')), .groups = 'drop'),
+      
+      c('region', 'year')
+    ) %>% 
+      assert(not_na, everything()) %>%
+      full_join(
+        data[,,cartesian(outputs_trans, c('TFC', 'IRONSTL')), 
+             pmatch = 'left'] %>% 
+          as.data.frame() %>% 
+          as_tibble() %>% 
+          filter(0 != !!sym('Value')) %>% 
+          select(iso3c = 'Region', year = 'Year', name = 'Data2',
+                 value = 'Value') %>% 
+          character.data.frame() %>% 
+          mutate(year = as.integer(as.character(!!sym('year')))) %>% 
+          inner_join(region_mapping, 'iso3c') %>% 
+          group_by(!!sym('region'), !!sym('year'), !!sym('name')) %>% 
+          summarise(value = sum(!!sym('value')), .groups = 'drop') %>% 
+          pivot_wider() %>% 
+          mutate(non_steel = !!sym('TFC') - !!sym('IRONSTL')),
+        
+        c('region', 'year')
+      ) %>% 
+      assert(not_na, everything()) %>% 
+      mutate(
+        industry_share_inputs  = !!sym('TFC') / !!sym('outputs'),
+        non_steel_share_inputs = !!sym('non_steel') / !!sym('TFC')
+                               * !!sym('industry_share_inputs'),
+        steel_share_inputs     = !!sym('industry_share_inputs') 
+                               - !!sym('non_steel_share_inputs')) %>% 
+      select('region', 'year', 'product', 
+             'steel_share_inputs', 'non_steel_share_inputs')
+  }
   
   # ---- calculate factors to replace blast furnace outputs ----
   # get subset of data pertaining to blast furnaces
@@ -167,47 +230,30 @@ fix_IEA_data_for_Industry_subsectors <- function(data, ieamatch) {
   
   data_BLASTFUR <- data[,,flows_BLASTFUR] %>% 
     as.data.frame() %>% 
-    tbl_df() %>% 
+    as_tibble() %>% 
     select(iso3c = 'Region', year = 'Year', product = 'Data1', flow = 'Data2', 
            value = 'Value') %>% 
-    filter(0 != .data$value) %>% 
-    mutate(year = as.integer(as.character(.data$year)))
+    filter(0 != !!sym('value')) %>% 
+    mutate(year = as.integer(as.character(!!sym('year'))))
   
   # save output products from blast furnaces for replacement further upstream
   # (coke ovens) and downstream (industry)
   outputs_BLASTFUR <- data_BLASTFUR %>% 
-    filter(0 < .data$value) %>% 
+    filter(0 < !!sym('value')) %>% 
     getElement('product') %>% 
     unique() %>% 
     as.character()
   
-  # aggregate over regions
-  factors_BLASTFUR <- inner_join(data_BLASTFUR, region_mapping, 'iso3c') %>% 
-    group_by(.data$region, .data$year, .data$product) %>% 
-    summarise(value = sum(.data$value)) %>% 
-    ungroup()
-  
   # calculate the factor with which blast furnace outputs (i.e. industry inputs) 
   # are replaced by blast furnace inputs
-  factors_BLASTFUR <- inner_join(
-    # inputs into blast furnaces
-    factors_BLASTFUR %>% 
-      filter(0 > .data$value),
-    
-    # outputs from blast furnaces
-    factors_BLASTFUR %>% 
-      filter(0 < .data$value) %>% 
-      group_by(.data$region, .data$year) %>% 
-      summarise(output = sum(.data$value)) %>% 
-      ungroup(),
-    
-    c('region', 'year')
-  ) %>% 
-    group_by(.data$region, .data$year, .data$product) %>% 
-    summarise(factor = abs(.data$value / .data$output)) %>% 
-    ungroup()
-  
-  # ==== replace coke oven outputs with coke oven inputs ====
+  factors_BLASTFUR <- data_BLASTFUR %>% 
+    inner_join(region_mapping, 'iso3c') %>% 
+    group_by(!!sym('region'), !!sym('year'), !!sym('product'), 
+             !!sym('flow')) %>% 
+    summarise(value = sum(!!sym('value')), .groups = 'drop') %>% 
+    calc_industry_input_factors(data)
+
+  # ---- replace coke oven outputs with coke oven inputs ----
   
   # get subset of data pertaining to coke ovens
   flows_COKEOVS <- grep('^(TOTAL|MRENEW)', 
@@ -216,71 +262,61 @@ fix_IEA_data_for_Industry_subsectors <- function(data, ieamatch) {
 
   data_COKEOVS <- data[,,flows_COKEOVS] %>% 
     as.data.frame() %>% 
-    tbl_df() %>% 
+    as_tibble() %>% 
     select(iso3c = 'Region', year = 'Year', product = 'Data1', flow = 'Data2',
            value = 'Value') %>% 
-    filter(0 != .data$value) %>% 
-    mutate(year = as.integer(as.character(.data$year)))
+    filter(0 != !!sym('value')) %>% 
+    mutate(year = as.integer(as.character(!!sym('year'))))
   
   # save output products from coke ovens for replacement downstream (industry)
   outputs_COKEOVS <- data_COKEOVS %>% 
-    filter(0 < .data$value) %>% 
+    filter(0 < !!sym('value')) %>% 
     getElement('product') %>% 
     unique() %>% 
     as.character()
-  
-  # aggregate over regions
-  factors_COKEOVS <- inner_join(data_COKEOVS, region_mapping, 'iso3c') %>% 
-    group_by(.data$region, .data$year, .data$product) %>% 
-    summarise(value = sum(.data$value)) %>% 
-    ungroup()
-  
+
   # replace inputs into coke ovens, that are themselves outputs of blast 
-  # furnaces, by the appropriate amount o blast furnace inputs
-  factors_COKEOVS <- bind_rows(
+  # furnaces, by the appropriate amount of blast furnace inputs
+  data_COKEOVS <- bind_rows(
     # for each Joule of blast furnace output, use factor Joules of all blast 
     # furnace inputs instead
-    factors_COKEOVS %>% 
-      filter(.data$product %in% outputs_BLASTFUR) %>% 
+    data_COKEOVS %>% 
+      filter(!!sym('product') %in% outputs_BLASTFUR) %>% 
+      inner_join(region_mapping, 'iso3c') %>% 
+      group_by(!!sym('region'), !!sym('year'), !!sym('product')) %>% 
+      summarise(value = sum(!!sym('value')), .groups = 'drop') %>% 
       rename(product.replace = 'product') %>% 
-      inner_join(factors_BLASTFUR, c('region', 'year')) %>% 
-      group_by(.data$region, .data$year, .data$product) %>% 
-      summarise(value = sum(.data$value * .data$factor)) %>% 
-      ungroup(),
+      # for replacing coke oven inputs, use total industry factors
+      inner_join(
+        factors_BLASTFUR %>% 
+          pivot_longer(c(-'region', -'year', -'product')) %>% 
+          group_by(!!sym('region'), !!sym('year'), !!sym('product')) %>% 
+          summarise(factor = sum(!!sym('value')), .groups = 'drop'), 
+        
+        c('region', 'year')) %>% 
+      group_by(!!sym('region'), !!sym('year'), !!sym('product')) %>% 
+      summarise(value = sum(!!sym('value') * !!sym('factor')), 
+                .groups = 'drop'),
     
-    factors_COKEOVS %>% 
-      filter(!.data$product %in% outputs_BLASTFUR)
+    data_COKEOVS %>% 
+      filter(!(!!sym('product') %in% outputs_BLASTFUR)) %>% 
+      inner_join(region_mapping, 'iso3c') %>% 
+      group_by(!!sym('region'), !!sym('year'), !!sym('product')) %>% 
+      summarise(value = sum(!!sym('value')), .groups = 'drop')
   ) %>% 
-    group_by(.data$region, .data$year, .data$product) %>% 
-    summarise(value = sum(.data$value)) %>% 
-    ungroup()
+    group_by(!!sym('region'), !!sym('year'), !!sym('product')) %>% 
+    summarise(value = sum(!!sym('value')), .groups = 'drop')
   
   # calculate the factor with which coke oven outputs (i.e. industry inputs) 
   # are replaced by coke oven inputs
-  factors_COKEOVS <- inner_join(
-    # inputs into coke ovens
-    factors_COKEOVS %>% 
-      filter(0 > .data$value),
-    
-    # outputs from coke ovens
-    factors_COKEOVS %>% 
-      filter(0 < .data$value) %>% 
-      group_by(.data$region, .data$year) %>% 
-      summarise(output = sum(.data$value)) %>% 
-      ungroup(),
-    
-    c('region', 'year')
-  ) %>% 
-    group_by(.data$region, .data$year, .data$product) %>% 
-    summarise(factor = abs(.data$value / .data$output)) %>% 
-    ungroup()
+  factors_COKEOVS <- calc_industry_input_factors(data_COKEOVS, data)
   
   # ---- replace blast furnace and coke oven outputs by respective inputs ----
   
   # get data that needs to be replaced: blast furnace and coke oven outputs that
   # are inputs in industry sectors
   REMIND_industry_flows <- c(
-    flows_to_fix, 
+    TOTIND_flows, 
     'INONSPEC', 'AGRICULT', 'FISHING',
     'MAINELEC', 'AUTOELEC', 'MAINCHP', 'AUTOCHP', 'MAINHEAT', 'AUTOHEAT',
     'NONENUSE')
@@ -290,53 +326,61 @@ fix_IEA_data_for_Industry_subsectors <- function(data, ieamatch) {
   
   data_to_fix <- data[,,replace_product.flow] %>% 
     as.data.frame() %>% 
-    tbl_df() %>% 
+    as_tibble() %>% 
     select(iso3c = 'Region', year = 'Year', product = 'Data1', flow = 'Data2', 
            value = 'Value') %>% 
-    filter(0 != .data$value) %>% 
-    mutate(year = as.integer(as.character(.data$year)))
+    filter(0 != !!sym('value')) %>% 
+    mutate(year = as.integer(as.character(!!sym('year'))))
   
   # replace blast furnace outputs
   data_for_fixing <- bind_rows(
     data_to_fix %>% 
-      filter(.data$product %in% outputs_BLASTFUR,
-             .data$flow %in% REMIND_industry_flows,
-             0 != .data$value) %>% 
-      select(-.data$product) %>% 
+      filter(!!sym('product') %in% outputs_BLASTFUR,
+             !!sym('flow') %in% REMIND_industry_flows,
+             0 != !!sym('value')) %>% 
+      select(-'product') %>% 
       inner_join(region_mapping, 'iso3c') %>% 
       inner_join(factors_BLASTFUR, c('region', 'year')) %>% 
-      group_by(.data$iso3c, .data$year, .data$product, .data$flow) %>% 
-      summarise(value = sum(.data$value * .data$factor)) %>% 
-      ungroup() %>% 
+      group_by(!!sym('iso3c'), !!sym('year'), !!sym('product'), 
+               !!sym('flow')) %>% 
+      summarise(
+        value = sum(!!sym('value') * ifelse('IRONSTL' == !!sym('flow'),
+                                            !!sym('steel_share_inputs'),
+                                            !!sym('non_steel_share_inputs'))), 
+                .groups = 'drop') %>% 
       character.data.frame(),
     
     data_to_fix %>% 
-      filter( !.data$product %in% outputs_BLASTFUR 
-            | !.data$flow %in% REMIND_industry_flows) %>% 
+      filter( !(!!sym('product') %in% outputs_BLASTFUR)
+            | !(!!sym('flow')    %in% REMIND_industry_flows)) %>% 
       character.data.frame()
   )
   
   # replace coke oven outputs
   data_for_fixing <- bind_rows(
     data_for_fixing %>% 
-      filter(.data$product %in% outputs_COKEOVS,
-             .data$flow %in% REMIND_industry_flows,
-             0 != .data$value) %>% 
-      select(-.data$product) %>% 
+      filter(!!sym('product') %in% outputs_COKEOVS,
+             !!sym('flow') %in% REMIND_industry_flows,
+             0 != !!sym('value')) %>% 
+      select(-'product') %>% 
       inner_join(region_mapping, 'iso3c') %>% 
       inner_join(factors_COKEOVS, c('region', 'year')) %>% 
-      group_by(.data$iso3c, .data$year, .data$product, .data$flow) %>% 
-      summarise(value = sum(.data$value * .data$factor)) %>% 
-      ungroup() %>% 
+      group_by(!!sym('iso3c'), !!sym('year'), !!sym('product'), 
+               !!sym('flow')) %>% 
+      summarise(
+        value = sum(!!sym('value') * ifelse('IRONSTL' == !!sym('flow'),
+                                            !!sym('steel_share_inputs'),
+                                            !!sym('non_steel_share_inputs'))),
+        .groups = 'drop') %>% 
       character.data.frame(),
     
     data_for_fixing %>% 
-      filter( !.data$product %in% outputs_COKEOVS 
-            | !.data$flow %in% REMIND_industry_flows)
+      filter(!( !!sym('product') %in% outputs_COKEOVS 
+              & !!sym('flow') %in% REMIND_industry_flows))
   ) %>% 
-    group_by(.data$iso3c, .data$year, .data$product, .data$flow) %>% 
-    summarise(value = sum(.data$value)) %>% 
-    ungroup() %>% 
+    group_by(!!sym('iso3c'), !!sym('year'), !!sym('product'), 
+             !!sym('flow')) %>% 
+    summarise(value = sum(!!sym('value')), .groups = 'drop') %>% 
     character.data.frame() %>% 
     rename(Region = 'iso3c', Year = 'year', Data1 = 'product', Data2 = 'flow',
            Value = 'value') %>%
