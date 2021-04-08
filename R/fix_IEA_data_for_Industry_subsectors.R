@@ -106,10 +106,10 @@ fix_IEA_data_for_Industry_subsectors <- function(data, ieamatch) {
   data_for_fixing <- full_join(
     # compute global averages
     data_for_fixing %>%
-      group_by(!!sym('year'), !!sym('product'), !!sym('flow')) %>%
+      group_by(!!!syms(c('year', 'product', 'flow'))) %>%
       summarise(value = sum(!!sym('value')), .groups = 'drop_last') %>%
       mutate(global_share = !!sym('value') / sum(!!sym('value'))) %>%
-      ungroup() %>%
+      ungroup() %>% 
       select(-'value') %>%
       # and expand to all regions
       mutate(region = NA_character_) %>%
@@ -130,12 +130,15 @@ fix_IEA_data_for_Industry_subsectors <- function(data, ieamatch) {
     mutate(value = ifelse(!is.na(!!sym('regional_share')), 
                           !!sym('regional_share'),
                           !!sym('global_share'))) %>%
-    select(-'regional_share', -'global_share') %>%
+    select(-'regional_share', -'global_share') %>% 
     interpolate_missing_periods_(
       periods = list(year = sub('^y([0-9]{4})$', '\\1', getYears(data)) %>% 
                        as.integer() %>% 
                        sort()), 
-      expand.values = TRUE, method = 'linear')
+      expand.values = TRUE, method = 'linear') %>%
+    group_by(!!!syms(c('year', 'region', 'product'))) %>% 
+    mutate(value = !!sym('value') / sum(!!sym('value'))) %>% 
+    ungroup()
 
   # calculated fixed data
   data_industry_fixed <- left_join(
