@@ -52,46 +52,20 @@ tool_fix_IEA_data_for_Industry_subsectors <- function(data, ieamatch) {
   region_mapping <- toolGetMapping(name = 'regionmapping_21_EU11.csv',
                                    type = 'regional') %>%
     as_tibble() %>%
-    select('iso3c' = .data$CountryCode, 'region' = .data$RegionCode)
+    select(iso3c = 'CountryCode', region = 'RegionCode')
 
-  # ---- extend industry subsector time series ----
-  # subset of data containing industry subsector products and flows
+  # extend industry subsector time series ----
+  ## get industry energy consumption ----
   data_industry <- data[,,cartesian(products_to_fix,
                                     c(flows_to_fix, 'TOTIND', 'INONSPEC'))] %>%
-    as.data.frame() %>%
-    as_tibble() %>%
-    select(iso3c = 'Region', year = 'Year', product = 'Data1', flow = 'Data2',
-           value = 'Value') %>%
-    mutate(year = as.integer(as.character(.data$year))) %>%
+    magclass_to_tibble() %>%
+    rename(iso3c = 'COUNTRY', year = 'TIME', product = 'PRODUCT',
+           flow = 'FLOW') %>%
     filter(0 != .data$value) %>%
     inner_join(region_mapping, 'iso3c') %>%
     assert(not_na, .data$region)
 
-  # all products that are consumed only in the non-specified subsector of
-  # industry are "suspicious" and are therefore fixed
-  data_to_fix <- inner_join(
-    data_industry %>%
-      filter('TOTIND' != .data$flow) %>%
-      group_by(.data$iso3c, .data$region, .data$year, .data$product) %>%
-      summarise(total = sum(.data$value, na.rm = TRUE), .groups = 'drop'),
-
-    data_industry %>%
-      filter(.data$flow %in% c('TOTIND', 'INONSPEC')) %>%
-      pivot_wider(names_from = 'flow', ),
-
-    c('iso3c', 'region', 'year', 'product')
-  ) %>%
-    filter(  abs(1 - (.data$total / .data$TOTIND)) > 1e-3
-           | .data$INONSPEC == .data$TOTIND) %>%
-    select(.data$iso3c, .data$region, .data$year, .data$product, .data$TOTIND)
-
-  # all industry subsectors that have specific energy demand below the
-  # thermodynamic limit are "suspicious" as well
-  industry_specific_FE_limits <- readSource(
-    type = 'ExpertGuess', subtype = 'industry_specific_FE_limits',
-    convert = FALSE) %>%
-    madrat_mule()
-
+  ## get industry production ----
   .get_production <- function(type, pf, flow) {
     calcOutput(
       type = type,
@@ -122,6 +96,22 @@ tool_fix_IEA_data_for_Industry_subsectors <- function(data, ieamatch) {
                                       c('ue_steel_primary',
                                         'ue_steel_secondary'), 'IRONSTL')
 
+  industry_production <- bind_rows(
+    cement_production,
+
+    steel_production
+  ) %>%
+    filter(0 != .data$value) %>%
+    group_by(!!!syms(c('iso3c', 'year', 'flow'))) %>%
+    summarise(production = sum(.data$value), .groups = 'drop')
+
+  ## get industry specific FE limits ----
+  industry_specific_FE_limits <- readSource(
+    type = 'ExpertGuess', subtype = 'industry_specific_FE_limits',
+    convert = FALSE) %>%
+    madrat_mule()
+
+  ## calculate industry FE limits ----
   industry_FE_limits <- bind_rows(
     cement_production %>%
       left_join(industry_specific_FE_limits, 'subsector') %>%
@@ -131,13 +121,156 @@ tool_fix_IEA_data_for_Industry_subsectors <- function(data, ieamatch) {
                 .groups = 'drop'),
 
     steel_production %>%
+      filter(0 != .data$value) %>%
       left_join(industry_specific_FE_limits, 'subsector') %>%
-      group_by(!!!syms(c('iso3c', 'year'))) %>%
+      group_by(!!!syms(c('iso3c', 'year', 'flow'))) %>%
       # Gt/year * GJ/t = EJ/year
       summarise(limit = sum(.data$value * .data$limit),
-                flow = 'IRONSTL',
                 .groups = 'drop')
   )
+
+  ## energy demand, but no production ----
+  data_energy_wo_production <- data_industry %>%
+    # select years and flows for which there is production data in general
+    # (1991-2014, NONMET and IRONSTL)
+    semi_join(industry_production, c('year', 'flow')) %>%
+    # filter countries/years/flows with actual production data
+    anti_join(industry_production, c('iso3c', 'year', 'flow'))
+
+  data_industry <- data_industry %>%
+    # filter years with energy demand but w/o industry production
+    anti_join(
+      data_energy_wo_production,
+
+      c('iso3c', 'year', 'product', 'flow')
+    ) %>%
+    # move energy demand to non-specified industry
+    bind_rows(
+      data_industry %>%
+        semi_join(
+          data_energy_wo_production,
+
+          c('iso3c', 'year', 'product', 'flow')
+        ) %>%
+        mutate(flow = 'INONSPEC')
+    ) %>%
+    # collect data
+    group_by(!!!syms(c('region', 'iso3c', 'year', 'product', 'flow'))) %>%
+    summarise(value = sum(.data$value), .groups = 'drop')
+
+  rm(data_energy_wo_production)
+
+  ## specific energy demand below thermodynamic limit ----
+  # find countries/year/flows with too low specific energy consumption
+  data_specific_energy_too_low <- data_industry %>%
+    # select countries, years, and flows for which there is production data
+    # (1991-2014, NONMET and IRONSTL)
+    semi_join(industry_FE_limits, c('iso3c', 'year', 'flow')) %>%
+    # calculate total energy consumption by flow
+    group_by(!!!syms(c('region', 'iso3c', 'year', 'flow'))) %>%
+    summarise(value = sum(.data$value), .groups = 'drop') %>%
+    # compare to minimal flow
+    left_join(industry_FE_limits, c('iso3c', 'year', 'flow')) %>%
+    assert(not_na, everything()) %>%
+    filter(.data$value < .data$limit) %>%
+    select('region', 'iso3c', 'year', 'flow')
+
+  # calculate regional and global average specific energy consumption averages,
+  # disregarding countries with too low consumption
+  specific_energy_averages <- data_industry %>%
+    # add industry production data
+    inner_join(industry_production, c('iso3c', 'year', 'flow')) %>%
+    # filter countries/years/flows with too low specific energy consumption
+    anti_join(
+      data_specific_energy_too_low,
+
+      c('region', 'iso3c', 'year', 'flow')
+    ) %>%
+    # duplicate data for global region
+    duplicate_(list(region = 'World')) %>%
+    # calculate regional and global averages
+    group_by(!!!syms(c('region', 'year', 'product', 'flow'))) %>%
+    summarise(value = sum(.data$value) / sum(.data$production),
+              .groups = 'drop') %>%
+    pivot_wider(names_from = 'region') %>%
+    pivot_longer(all_of(unique(region_mapping$region)), names_to = 'region',
+                 values_to = 'specific.FE.region', values_drop_na = TRUE) %>%
+    rename(specific.FE.global = 'World') %>%
+    assert(is.finite, all_of(c('specific.FE.region', 'specific.FE.global')),
+           description = 'Finite regional and global specific FE averages')
+
+  # country/year/flow data based on regional/global averages to replace
+  # defective data
+  data_replacement <- data_specific_energy_too_low %>%
+    left_join(industry_production, c('iso3c', 'year', 'flow')) %>%
+    left_join(specific_energy_averages, c('region', 'year', 'flow')) %>%
+    mutate(value = .data$production * ifelse(!is.na(.data$specific.FE.region),
+                                             .data$specific.FE.region,
+                                             .data$specific.FE.global)) %>%
+    select(all_of(colnames(data_industry)))
+
+
+
+  # three cases for the resulting data:
+  bind_rows(
+    # 1. Specific energy demand is above the thermodynamic limit.  Do nothing,
+    #    just carry the data along.  This is all data for which no replacement
+    #    data is present.
+    data_industry %>%
+      anti_join(data_replacement, setdiff(colnames(.), 'value')),
+
+    # 2. Specific energy demand is too low.
+    #    2.a. There is no consumption of <product> in question in subsector
+    #         <flow>.  Move the energy from INONSPEC to <flow>.
+    #    2.b. There is some consumption of <product> in question in subsector
+    #         <flow>, but too little.
+    #
+    data_replacement %>%
+      duplicate_(list(flow = 'INONSPEC')) %>%
+      # move from INONSPEC to <flow>: <flow> is positive, INONSPEC is negative
+      mutate(value = .data$value * ifelse('INONSPEC' != .data$flow, 1, -1)),
+
+    # specific energy demand for some product is present, but too low: move the
+    # difference (missing energy) from non-specified industry to the relevant
+    # flow
+    data_replacement %>%
+      semi_join(data_industry, setdiff(colnames(.), 'value')) %>%
+      duplicate_(list(flow = 'INONSPEC')) %>%
+      # move from <flow> to INONSPEC: <flow> is negative, INONSPEC is positive
+      mutate(value = .data$value * ifelse('INONSPEC' == .data$flow, 1, -1)),
+
+    data_industry
+
+
+
+
+
+
+  # all products that are consumed only in the non-specified subsector of
+  # industry are "suspicious" and are therefore fixed
+  data_to_fix <- inner_join(
+    data_industry %>%
+      filter('TOTIND' != .data$flow) %>%
+      group_by(.data$iso3c, .data$region, .data$year, .data$product) %>%
+      summarise(total = sum(.data$value, na.rm = TRUE), .groups = 'drop'),
+
+    data_industry %>%
+      filter(.data$flow %in% c('TOTIND', 'INONSPEC')) %>%
+      pivot_wider(names_from = 'flow', ),
+
+    c('iso3c', 'region', 'year', 'product')
+  ) %>%
+    filter(  abs(1 - (.data$total / .data$TOTIND)) > 1e-3
+           | .data$INONSPEC == .data$TOTIND) %>%
+    select(.data$iso3c, .data$region, .data$year, .data$product, .data$TOTIND)
+
+  # all industry subsectors that have specific energy demand below the
+  # thermodynamic limit are "suspicious" as well
+
+
+
+
+
 
   data_to_fix2 <- inner_join(
     data_industry %>%
@@ -193,9 +326,10 @@ tool_fix_IEA_data_for_Industry_subsectors <- function(data, ieamatch) {
     # EJ/year / Gt/year = GJ/t
     summarise(value = sum(.data$energy) / sum(.data$production),
               .groups = 'drop') %>%
-    filter(!is.finite(value))
     # separate regional and global specific FE
-    pivot_wider(names_from = 'region')
+    pivot_wider(names_from = 'region') %>%
+    pivot_longer(all_of(unique(region_mapping$region)), names_to = 'region') %>%
+    rename(specific.FE.region = 'value', specific.FE.global = 'World')
 
   foo %>%
     right_join(
