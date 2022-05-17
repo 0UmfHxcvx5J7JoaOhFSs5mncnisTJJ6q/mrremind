@@ -211,13 +211,61 @@ tool_fix_IEA_data_for_Industry_subsectors <- function(data, ieamatch) {
 
 
 
-  # three cases for the resulting data:
+  # X cases for the resulting data:
   bind_rows(
-    # 1. Specific energy demand is above the thermodynamic limit.  Do nothing,
-    #    just carry the data along.  This is all data for which no replacement
-    #    data is present.
+    # 1. Total (sum over all products) specific FE consumption is above the
+    #    thermodynamic limit.
+    #    Do nothing, just move data along.
     data_industry %>%
-      anti_join(data_replacement, setdiff(colnames(.), 'value')),
+      # filter data with too low specific FE consumption, the remainder is data
+      # with OK specific FE consumption
+      anti_join(
+        data_specific_energy_too_low,
+
+        colnames(data_specific_energy_too_low)
+      ),
+
+    # 2. Total (sum over all products) specific FE consumption is below the
+    #    thermodynamic limit.
+    #    Decide based in individual products.
+    # 2.a. All specific FE consumptions for individual products are lower than
+    #      the replacement value (including zero).
+    #      Increase the individual specific FE consumptions to the replacement
+    #      level and decrease their use in non-specified industry by an equal
+    #      amount.
+    #      To that end, decrease (increase) the flow (INONSPEC) by the existing
+    #      amount, then increase (decrease) the flow (INONSPEC) by the
+    #      replacement.
+    #
+    # 2.b. Some specific FE consumption for individual products are higher than
+    #      the replacement value.
+    #      Rebalance replacement values such that no product consumption is
+    #      reduced and the total replacement specific FE consumption is met.
+
+    data_industry %>%
+      # filter data that need replacement
+      right_join(
+        data_replacement %>%
+          rename(replacement = 'value'),
+
+        setdiff(colnames(.), 'value')
+      ) %>%
+      # set missing products to 0
+      replace_na(list(value = 0)) %>%
+      # filter replacements below existing values
+      filter(.data$replacement < .data$value) %>%
+      filter('FIN' == iso3c, 1999 == year, 'IRONSTL' == flow) %>% # FIXME
+      group_by(!!!syms(c('region', 'iso3c', 'year', 'product', 'flow'))) %>%
+      transmute(difference = .data$value - .data$replacement) %>%
+      ungroup() %>%
+      rename(product.exceed = 'product') %>%
+      left_join(
+        data_replacement,
+
+        c('region', 'iso3c', 'year', 'flow')
+      ) %>%
+      group_by(!!!syms(c('region', 'iso3c', 'year', 'flow'))) %>%
+      mutate(foo =
 
     # 2. Specific energy demand is too low.
     #    2.a. There is no consumption of <product> in question in subsector
