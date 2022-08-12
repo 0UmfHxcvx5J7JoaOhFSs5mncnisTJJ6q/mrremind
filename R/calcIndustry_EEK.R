@@ -158,16 +158,18 @@ calcIndustry_EEK <- function(kap) {
     select(-'temper')
 
   ## calculate EEK growth rates ----
-  # EEK is assumed to stay constant in relation to subsector output, so it
-  # grows/shrinks as the output grows/shrinks.  Shrinking of EEK is limited by
-  # the depreciation rate i.
+  # EEK is assumed to stay constant in relation to subsector energy input, so
+  # it grows/shrinks as the energy demand grows/shrinks.  Shrinking of EEK is
+  # limited by the depreciation rate i.
   EEK_change <- FEdemand %>%
-    `[`(,,'ue_', pmatch = TRUE) %>%
-    magclass_to_tibble(c('iso3c', 'year', 'scenario', 'subsector', 'value')) %>%
-    filter(.data$subsector %in% c('ue_cement', 'ue_chemicals',
-                                  'ue_steel_primary', 'ue_steel_secondary',
-                                  'ue_otherInd')) %>%
-    group_by(!!!syms(c('iso3c', 'scenario', 'subsector'))) %>%
+    `[`(,,'fe', pmatch = 'left') %>%
+    magclass_to_tibble(c('iso3c', 'year', 'scenario', 'pf', 'value')) %>%
+    filter(grepl('_(cement|chemicals|steel|otherInd)', .data$pf)) %>%
+    # aggregate FE by subsector
+    mutate(pf = sub('_steel$', '_steel_primary', .data$pf)) %>%
+    extract('pf', 'subsector', '^fe[^_]*_(.*)$') %>%
+    group_by(!!!syms(c('iso3c', 'scenario', 'subsector', 'year'))) %>%
+    summarise(value = sum(.data$value), .groups = 'drop_last') %>%
     mutate(
       # Replace zeros with the first non-zero.  This keeps EEK constant back in
       # time for countries/subsectors that have no historic production.
@@ -196,8 +198,7 @@ calcIndustry_EEK <- function(kap) {
     select(-'value')
 
   EEK <- full_join(
-    EEK %>%
-      mutate(subsector = paste0('ue_', .data$subsector)),
+    EEK,
 
     EEK_change,
 
@@ -205,7 +206,7 @@ calcIndustry_EEK <- function(kap) {
   ) %>%
     assert(not_na, everything()) %>%
     mutate(value = .data$EEK * .data$change,
-           subsector = sub('^ue_', 'kap_', .data$subsector)) %>%
+           subsector = sub('^', 'kap_', .data$subsector)) %>%
     select('iso3c', 'year', 'scenario', 'subsector', 'value')
 
   # return ----
