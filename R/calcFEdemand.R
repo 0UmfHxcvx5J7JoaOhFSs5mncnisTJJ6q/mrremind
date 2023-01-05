@@ -900,6 +900,7 @@ calcFEdemand <- function(subtype = "FE") {
         as_tibble() %>%
         select(iso3c = 'CountryCode', region = 'RegionCode')
 
+      ### load industry subsector specific material demand factors ----
       industry_subsectors_material_alpha <- calcOutput(
         type = 'industry_subsectors_specific', subtype = 'material_alpha',
         scenarios = c(getNames(x = industry_subsectors_ue, dim = 1),
@@ -964,6 +965,34 @@ calcFEdemand <- function(subtype = "FE") {
                                min(.$year)))),
           expand.values = TRUE)
 
+      #### FIXME add NAVIGATE Low Material Demand stubs ----
+      industry_subsectors_material_relative <- bind_rows(
+        industry_subsectors_material_relative,
+
+        tribble(
+          ~subsector,             ~factor,
+          'ue_cement',            0.85,
+          'ue_steel_primary',     0.85,
+          'ue_steel_secondary',   0.85) %>%
+          expand_grid(scenario = 'gdp_SSP2EU_NAV_LMD',
+                      base.scenario = 'gdp_SSP2EU',
+                      region = unique(region_mapping_21$region))
+      )
+
+      industry_subsectors_material_relative_change <- bind_rows(
+        industry_subsectors_material_relative_change,
+
+        tribble(
+          ~subsector,   ~factor,
+          'ue_chemicals',   1.02,
+          'ue_otherInd',    1.02) %>%
+          expand_grid(scenario = 'gdp_SSP2EU_NAV_LMD',
+                      base.scenario = 'gdp_SSP2EU',
+                      region = unique(region_mapping_21$region))
+      )
+
+
+      # verify all scenario/region/subsector combinations are defined only once
       bind_rows(
         industry_subsectors_material_alpha %>%
           select('scenario', 'region', 'subsector'),
@@ -1085,7 +1114,16 @@ calcFEdemand <- function(subtype = "FE") {
           ) %>%
           left_join(
             foo %>%
-              select('scenario', 'subsector', 'iso3c', 'year', 'GDP', 'value'),
+              select('scenario', 'subsector', 'iso3c', 'year', 'GDP',
+                     'value') %>%
+              # FIXME add SSP2EU_NAV_LMD GDP data
+              bind_rows(
+                foo %>%
+                  filter('gdp_SSP2EU' == .data$scenario) %>%
+                  select('scenario', 'subsector', 'iso3c', 'year', 'GDP',
+                         'value') %>%
+                  mutate(scenario = 'gdp_SSP2EU_NAV_LMD')
+              ),
 
             c('scenario', 'subsector', 'iso3c', 'year')
           ) %>%
@@ -1118,8 +1156,15 @@ calcFEdemand <- function(subtype = "FE") {
                  base.value = 'value', base.GDP = 'GDP', 'factor') %>%
           # GDP trajectories of target scenarios
           left_join(
-            foo %>%
-              select('scenario', 'iso3c', 'subsector', 'year', 'GDP'),
+            bind_rows(
+              foo %>%
+                select('scenario', 'iso3c', 'subsector', 'year', 'GDP'),
+
+              foo %>%
+                select('scenario', 'iso3c', 'subsector', 'year', 'GDP') %>%
+                filter('gdp_SSP2EU' == .data$scenario) %>%
+                mutate(scenario = 'gdp_SSP2EU_NAV_LMD')
+            ),
 
             c('scenario', 'iso3c', 'subsector', 'year')
           ) %>%
@@ -1963,21 +2008,70 @@ calcFEdemand <- function(subtype = "FE") {
                                             getItems(reminditems, "item"))
       description_out <- "useful energy demand in buildings"
     }
+
+    # complete NAVIGATE scenarios with missing data ----
     if (subtype == "FE") {
-      # duplicate SSP2EU scenarios of industry for Navigate scenarios
-      industryItems <- grep("(.*i$)|chemicals|steel|otherInd|cement",
+      # (A) scenarios SSP2EU_NAV_act, SSP2EU_NAV_tec, SSP2EU_NAV_ele,
+      #     and SSP2EU_NAV_all use SSP2EU numbers for industry
+      # (B) scenario SSP2EU_NAV_LMD uses SSP2EU numbers for everything but
+      #     industry
+      # (C) other scenarios stay the same
+
+      industryItems <- grep("i$|chemicals|steel|otherInd|cement",
                             getItems(reminditems, 3.2), value = TRUE)
       nonIndustryItems <- setdiff(getItems(reminditems, 3.2), industryItems)
-      navigateScenarios <- grep("SSP2EU_NAV_", getItems(reminditems, 3.1), value = TRUE)
-      nonNavigateScenarios <- setdiff(getItems(reminditems, 3.1), navigateScenarios)
+
+      scenarios_A <- paste0("gdp_SSP2EU_NAV_", c("act", "tec", "ele", "all"))
+      scenarios_B <- 'gdp_SSP2EU_NAV_LMD'
+      scenarios_C <- setdiff(getItems(reminditems, 3.1),
+                             c(scenarios_A, scenarios_B))
+
       reminditems <- mbind(
-        mselect(reminditems, scenario = nonNavigateScenarios),
-        mselect(reminditems, scenario = navigateScenarios, item = nonIndustryItems),
-        addDim(mselect(reminditems, scenario = "gdp_SSP2EU", item = industryItems,
-                       collapseNames = TRUE),
-               paste0("gdp_SSP2EU_NAV_", c("act", "tec", "ele", "all")),
-               "scenario", 3.1)
+        # everything but industry from scenarios A
+        mselect(reminditems, scenario = scenarios_A, item = nonIndustryItems),
+
+        # SSP2EU industry for scenarios A
+        addDim(x = mselect(reminditems, scenario = "gdp_SSP2EU",
+                           item = industryItems, collapseNames = TRUE),
+               addnm = scenarios_A, dim = "scenario", dimCode = 3.1),
+
+        # industry for scenarios B
+        mselect(reminditems, scenario = scenarios_B, item = industryItems),
+
+        # SSP2EU for everything but industry in scenarios B
+        addDim(x = mselect(reminditems, scenario = 'gdp_SSP2EU',
+                           item = nonIndustryItems, collapseNames = TRUE),
+               addnm = scenarios_B, dim = 'scenario', dimCode = 3.1),
+
+        # everything from scenarios C
+        mselect(reminditems, scenario = scenarios_C)
       )
+
+      # add fixed_shares industry numbers as sums of subsectors numbers for
+      # scenarios C
+      l <- list(fesoi = c("feso_cement", "feso_chemicals", "feso_otherInd",
+                          "feso_steel"),
+                fehoi = c("feli_cement", "feli_chemicals", "feli_otherInd",
+                          "feli_steel"),
+                fegai = c("fega_cement", "fega_chemicals", "fega_otherInd",
+                          "fega_steel"),
+                feh2i = c("feh2_cement", "feh2_chemicals", "feh2_otherInd",
+                          "feh2_steel"),
+                feeli = c("feel_cement", "feelwlth_chemicals",
+                          "feelhth_chemicals", "feelwlth_otherInd",
+                          "feelhth_otherInd", "feel_steel_primary",
+                          "feel_steel_secondary"),
+                fehei = c("fehe_otherInd"))
+
+      for (i in seq_along(l)) {
+        reminditems <- mbind(
+          reminditems,
+
+          mselect(reminditems, scenario = scenarios_B, item = l[[i]]) %>%
+            dimSums(dim = 3.2) %>%
+            add_dimension(dim = 3.2, add = 'item', nm = names(l[i]))
+        )
+      }
     }
 
     structure_data <- switch(subtype,
