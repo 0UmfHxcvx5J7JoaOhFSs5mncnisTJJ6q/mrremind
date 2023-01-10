@@ -1858,18 +1858,23 @@ calcIndustry_Value_Added <- function(subtype = 'physical',
   regression_parameters_cement_production_converging <-
     regression_parameters_cement_production %>%
     filter('World' != .data$region) %>%
-    mutate(year = 2000L,
-           target_year = case_when(
-             'CHA' == .data$region ~ 2100L,
-             TRUE                  ~ 2200L)) %>%
-    complete(nesting(!!!syms(c('region', 'a', 'b', 'target_year'))),
+    mutate(year = 2000L) %>%
+    complete(nesting(!!!syms(c('region', 'a', 'b'))),
              year = 2000:2100) %>%
+    left_join(
+      readSource(type = 'ExpertGuess',
+                 subtype = 'cement_production_convergence_parameters',
+                 convert = FALSE) %>%
+        madrat_mule(),
+
+      'region'
+    ) %>%
     mutate(a = .data$a
-             + ( (param_a - .data$a)
-               / (.data$target_year - 2000)
-               * (.data$year - 2000)
+             + ( (param_a * .data$convergence.level - .data$a)
+               / (.data$convergence.year - 2000)
+               * (.data$year             - 2000)
                )) %>%
-    select(-'target_year')
+    select(-'convergence.level', -'convergence.year')
 
   projected_cement_data <- inner_join(
     regression_parameters_cement_production_converging,
