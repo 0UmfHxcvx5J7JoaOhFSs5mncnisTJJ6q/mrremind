@@ -169,6 +169,8 @@ calcIndustry_EEK <- function(kap) {
     filter(.data$subsector %in% c('ue_cement', 'ue_chemicals',
                                   'ue_steel_primary', 'ue_steel_secondary',
                                   'ue_otherInd')) %>%
+    mutate(value = ifelse(0 > .data$value, NA, .data$value)) %>%
+    interpolate_missing_periods_(periods = list(year = unique(.$year))) %>%
     # calculate baseline change rates relative to base_year
     group_by(!!!syms(c('iso3c', 'scenario', 'subsector'))) %>%
     mutate(
