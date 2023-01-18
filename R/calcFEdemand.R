@@ -979,18 +979,13 @@ calcFEdemand <- function(subtype = "FE") {
                       region = unique(region_mapping_21$region))
       )
 
-      industry_subsectors_material_relative_change <- bind_rows(
-        industry_subsectors_material_relative_change,
-
-        tribble(
-          ~subsector,   ~factor,
-          'ue_chemicals',   1.02,
-          'ue_otherInd',    1.02) %>%
-          expand_grid(scenario = 'gdp_SSP2EU_NAV_LMD',
-                      base.scenario = 'gdp_SSP2EU',
-                      region = unique(region_mapping_21$region))
-      )
-
+      industry_subsectors_material_specific_relative <- expand_grid(
+        scenario         = 'gdp_SSP2EU_NAV_LMD',
+        base.scenario    = 'gdp_SSP2EU',
+        region           = unique(region_mapping_21$region),
+        subsector        = c('ue_chemicals', 'ue_otherInd'),
+        factor           = -0.0025, # -0.25 % p.a.
+        convergence.time = 50)
 
       # verify all scenario/region/subsector combinations are defined only once
       bind_rows(
@@ -1088,7 +1083,9 @@ calcFEdemand <- function(subtype = "FE") {
 
               foo %>%
                 filter('gdp_SSP2EU' == .data$scenario) %>%
-                mutate(scenario = 'gdp_SSP2_lowEn')
+                complete(nesting(!!!syms(c('iso3c', 'year', 'GDP', 'subsector',
+                                           'value'))),
+                         scenario = c('gdp_SSP2_lowEn', 'gdp_SSP2EU_NAV_LMD'))
             ),
 
             c('scenario', 'subsector', 'iso3c', 'year')
@@ -1253,7 +1250,41 @@ calcFEdemand <- function(subtype = "FE") {
           select('iso3c', 'scenario', 'subsector', 'year', 'value')
       )
 
-      industry_subsectors_ue <- foo4 %>%
+      ### NAVIAGATE LMD ----
+      foo5 <- industry_subsectors_material_specific_relative %>%
+        left_join(region_mapping_21, 'region') %>%
+        left_join(
+          foo %>%
+            semi_join(
+              industry_subsectors_material_specific_relative,
+
+              c('scenario' = 'base.scenario')
+            ) %>%
+            pivot_longer(c('GDP', 'value')) %>%
+            interpolate_missing_periods_(
+              periods = list(year = seq_range(range(.$year)))) %>%
+            pivot_wider(),
+
+          c('base.scenario' = 'scenario', 'iso3c', 'subsector')
+        ) %>%
+        select(-'base.scenario', -'region') %>%
+        group_by(.data$scenario, .data$subsector, .data$iso3c) %>%
+        mutate(
+          specific.production = .data$value / .data$GDP,
+          # specific production growth
+          foo = .data$specific.production
+              / lag(.data$specific.production, 1,
+                    first(.data$specific.production)),
+          # modified by factor (after 2015 only)
+          foo = .data$foo + .data$factor * (2015 < .data$year),
+          # first year spcific production * cumulated growth factors * GDP
+          value = .data$specific.production[.data$year == first(.data$year)]
+                * cumprod(.data$foo)
+                * .data$GDP) %>%
+        select(all_of(colnames(foo4))) %>%
+        semi_join(foo4, 'year')
+
+      industry_subsectors_ue <- bind_rows(foo4, foo5) %>%
         select('iso3c', 'year', 'scenario', pf = 'subsector', 'value') %>%
         as.magpie(spatial = 1, temporal = 2, data = ncol(.))
 
