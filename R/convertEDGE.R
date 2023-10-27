@@ -264,7 +264,8 @@ convertEDGE <- function(x, subtype = "FE_stationary") {
     region_col = which(names(mapping) == "RegionCodeEUR_ETP")
     iso_col = which(names(mapping) == "CountryCode")
 
-    x = x[,getYears(x,T)[which(getYears(x,T) <= 2100)],]
+    x <- x[,getYears(x,T)[which(getYears(x,T) <= 2100)],]
+    getItems(x, 3.1) <- paste0("gdp_", getItems(x, 3.1))
 
     wg     <- calcOutput("GDP", aggregate=F)
     wfe    <- calcOutput("FEdemand", subtype = "FE", aggregate = F)
