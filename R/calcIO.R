@@ -173,6 +173,76 @@ calcIO <- function(subtype = c("input", "output", "output_biomass", "trade",
            })
   )
 
+  # combine industry subsectors FE to industry fixed_shares FE ----
+  if ('output_Industry_subsectors' == subtype) {
+    industry_FE_mapping <- tribble(
+      ~sety,        ~fety.subsectors,      ~te.subsectors,      ~fety.outputs,   ~te.outputs,
+      'sesofos',    'feso_cement',         'tdso_cement',       'fesoi',         'tdfossoi',
+      'sesofos',    'feso_chemicals',      'tdso_chemicals',    'fesoi',         'tdfossoi',
+      'sesofos',    'feso_steel',          'tdso_steel',        'fesoi',         'tdfossoi',
+      'sesofos',    'feso_otherInd',       'tdso_otherInd',     'fesoi',         'tdfossoi',
+
+      'sesobio',    'feso_cement',         'tdso_cement',       'fesoi',         'tdbiosoi',
+      'sesobio',    'feso_chemicals',      'tdso_chemicals',    'fesoi',         'tdbiosoi',
+      'sesobio',    'feso_steel',          'tdso_steel',        'fesoi',         'tdbiosoi',
+      'sesobio',    'feso_otherInd',       'tdso_otherInd',     'fesoi',         'tdbiosoi',
+
+      'seliqfos',   'feli_cement',         'tdli_cement',       'fehoi',         'tdfoshoi',
+      'seliqfos',   'feli_chemicals',      'tdli_chemicals',    'fehoi',         'tdfoshoi',
+      'seliqfos',   'feli_steel',          'tdli_steel',        'fehoi',         'tdfoshoi',
+      'seliqfos',   'feli_otherInd',       'tdli_otherInd',     'fehoi',         'tdfoshoi',
+
+      'seliqbio',   'feli_cement',         'tdli_cement',       'fehoi',         'tdbiohoi',
+      'seliqbio',   'feli_chemicals',      'tdli_chemicals',    'fehoi',         'tdbiohoi',
+      'seliqbio',   'feli_steel',          'tdli_steel',        'fehoi',         'tdbiohoi',
+      'seliqbio',   'feli_otherInd',       'tdli_otherInd',     'fehoi',         'tdbiohoi',
+
+      'segafos',    'fega_cement',         'tdga_cement',       'fegai',         'tdfosgai',
+      'segafos',    'fega_chemicals',      'tdga_chemicals',    'fegai',         'tdfosgai',
+      'segafos',    'fega_steel',          'tdga_steel',        'fegai',         'tdfosgai',
+      'segafos',    'fega_otherInd',       'tdga_otherInd',     'fegai',         'tdfosgai',
+
+      'segabio',    'fega_cement',         'tdga_cement',       'fegai',         'tdbiogai',
+      'segabio',    'fega_chemicals',      'tdga_chemicals',    'fegai',         'tdbiogai',
+      'segabio',    'fega_steel',          'tdga_steel',        'fegai',         'tdbiogai',
+      'segabio',    'fega_otherInd',       'tdga_otherInd',     'fegai',         'tdbiogai',
+
+      'seh2',       'feh2_cement',          'tdh2_cement',      'feh2i',         'tdh2i',
+      'seh2',       'feh2_chemicals',       'tdh2_chemicals',   'feh2i',         'tdh2i',
+      'seh2',       'feh2_steel',           'tdh2_steel',       'feh2i',         'tdh2i',
+      'seh2',       'feh2_otherInd',        'tdh2_otherInd',    'feh2i',         'tdh2i',
+
+      'sehe',       'fehe_otherInd',        'tdhe_otherInd',    'fehei',         'tdhei',
+
+      'seel',       'feel_cement',          'tdel_cement',      'feeli',         'tdeli',
+      'seel',       'feelwlth_chemicals',   'tdel_chemicals',   'feeli',         'tdeli',
+      'seel',       'feel_steel',           'tdel_steel',       'feeli',         'tdeli',
+      'seel',       'feelwlth_otherInd',    'tdel_otherInd',    'feeli',         'tdeli')
+
+    existing_subsector_items <- intersect(
+      paste(industry_FE_mapping$sety, industry_FE_mapping$fety.subsectors,
+            industry_FE_mapping$te.subsectors, sep = '.'),
+      getItems(reminditems, dim = 3))
+
+    reminditems <- mbind(
+      reminditems[,,existing_subsector_items, invert = TRUE],
+
+      reminditems[,,existing_subsector_items] %>%
+        as.data.frame() %>%
+        as_tibble() %>%
+        left_join(
+          industry_FE_mapping,
+
+          c('Data1' = 'sety', 'Data2' = 'fety.subsectors',
+            'Data3' = 'te.subsectors')
+        ) %>%
+        group_by(.data$Region, .data$Year, .data$Data1, .data$fety.outputs,
+                 .data$te.outputs) %>%
+        summarise(Value = sum(.data$Value), .groups = 'drop') %>%
+        as.magpie(spatial = 1, temporal = 2, datacol = 6)
+    )
+  }
+
   # Split residential Biomass into traditional and modern biomass depending upon the income per capita
   if (subtype %in% c("output", "input", "output_Industry_subsectors")) {
     # In order to split the REMIND technology biotr between biotr and biotrmod,
