@@ -1783,11 +1783,11 @@ calcIndustry_Value_Added <- function(subtype = 'physical',
                          name = NULL) +
       geom_line(data = d_plot_projections %>%
                   filter(2050 >= .data$year),
-                mapping = aes(colour = !!sym('scenario'))) +
+                mapping = aes(colour = 'projection')) +
       geom_line(data = d_plot_regression,
                 mapping = aes(colour = 'regression')) +
       scale_colour_manual(values = c('regression' = 'red',
-                                     'SSP2' = 'black'),
+                                     'projection' = 'black'),
                           name = NULL,
                           guide = guide_legend(direction = 'horizontal')) +
       facet_wrap(vars(!!sym('region')), scales = 'free') +
@@ -2265,11 +2265,13 @@ calcIndustry_Value_Added <- function(subtype = 'physical',
       scale_shape_manual(values = c('region totals' = 'cross'),
                          name = NULL) +
       geom_line(data = d_plot_regression,
-                mapping = aes(linetype = 'regression')) +
+                mapping = aes(colour = 'regression')) +
       geom_line(data = d_plot_projections,
-                mapping = aes(linetype = !!sym('scenario'))) +
-      scale_linetype_manual(values = linetype_scenarios, name = NULL,
-                            guide = guide_legend(direction = 'horizontal')) +
+                mapping = aes(colour = 'projection')) +
+      scale_colour_manual(values = c('regression' = 'red',
+                                     'projection' = 'black'),
+                          name = NULL,
+                          guide = guide_legend(direction = 'horizontal')) +
       facet_wrap(vars(!!sym('region')), scales = 'free') +
       expand_limits(x = 0, y = 0) +
       labs(x = 'per-capita GDP [1000$/yr]',
