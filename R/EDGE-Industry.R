@@ -1264,7 +1264,7 @@ calcSteel_Projections <- function(subtype = 'production',
           group_by(.data$region, .data$year, .data$production) %>%
           summarise(value = sum(.data$value), .groups = 'drop') %>%
           sum_total_('region', name = 'World'),
-        mapping = aes(x = !!sym('year'), y = !!sym('value') * 1e-3,
+        mapping = aes(x = !!sym('year'), y = !!sym('value') * 1e3,
                       fill = !!sym('production'))) +
       facet_wrap(~ region, scales = 'free_y') +
       labs(x = NULL, y = 'Mt Steel/year') +
