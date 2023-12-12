@@ -1775,17 +1775,25 @@ calcIndustry_Value_Added <- function(subtype = 'physical',
       filter(.data$GDPpC <= .data$max.GDPpC) %>%
       select(-'max.GDPpC')
 
+    projection_points <- c(2030, 2050, 2075, 2100)
+
     p <- ggplot(mapping = aes(x = !!sym('GDPpC') / 1000,
                               y = !!sym('steel.VA.pt'))) +
       geom_point(data = d_plot_region_totals,
                  mapping = aes(shape = 'region totals')) +
-      scale_shape_manual(values = c('region totals' = 'cross'),
-                         name = NULL) +
+      geom_line(data = d_plot_regression,
+                mapping = aes(colour = 'regression')) +
       geom_line(data = d_plot_projections %>%
                   filter(2050 >= .data$year),
                 mapping = aes(colour = 'projection')) +
-      geom_line(data = d_plot_regression,
-                mapping = aes(colour = 'regression')) +
+      geom_point(data = d_plot_projections %>%
+                   filter(.data$year %in% projection_points),
+                 mapping = aes(shape = as.character(!!sym('year'))),
+                 size = 3) +
+      scale_shape_manual(values = c('region totals' = 'o',
+                                    setNames(rep('x', length(projection_points)),
+                                             projection_points)),
+                         name = NULL) +
       scale_colour_manual(values = c('regression' = 'red',
                                      'projection' = 'black'),
                           name = NULL,
@@ -1796,7 +1804,8 @@ calcIndustry_Value_Added <- function(subtype = 'physical',
            y = 'specific Steel Value Added [$/t]') +
       theme_minimal() +
       theme(legend.justification = c(1, 0),
-            legend.position = c(1, 0))
+            legend.position = c(1, 0),
+            legend.direction = 'horizontal')
 
     ggsave(plot = p, filename = '04_Steel_VA_regressions_projections.png',
            device = 'png', path = save.plots, bg = 'white',
@@ -2163,7 +2172,7 @@ calcIndustry_Value_Added <- function(subtype = 'physical',
       filter(max(.data$cement.production.pC) == .data$cement.production.pC) %>%
       pull('cement.production.pC')
 
-    projection_points <- c(2015, 2030, 2050, 2075, 2100)
+    projection_points <- c(2030, 2050, 2075, 2100)
 
     p <- ggplot(mapping = aes(x = !!sym('GDPpC') / 1000,
                               y = !!sym('cement.production')
@@ -2198,7 +2207,10 @@ calcIndustry_Value_Added <- function(subtype = 'physical',
       expand_limits(y = c(0, ceiling(y_max * 2) / 2)) +
       labs(x = 'per-capita GDP [1000 $/year]',
            y = 'per-capita Cement Production [tonnes/year]') +
-      theme_minimal()
+      theme_minimal() +
+      theme(legend.position = c(1, 0),
+            legend.justification = c(1, 0),
+            legend.direction = 'horizontal')
 
 
     ggsave(plot = p, filename = '01_Cement_regression_projection.png',
@@ -2284,7 +2296,8 @@ calcIndustry_Value_Added <- function(subtype = 'physical',
            y = 'specific Cement Value Added [$/t]') +
       theme_minimal() +
       theme(legend.justification = c(1, 0),
-            legend.position = c(1, 0))
+            legend.position = c(1, 0),
+            legend.direction = 'horizontal')
 
 
     ggsave(plot = p, filename = '05a_Cement_VA_regressions_projections.png',
@@ -2510,15 +2523,18 @@ calcIndustry_Value_Added <- function(subtype = 'physical',
         values = c('region totals' = 'o',
                    setNames(rep('x', length(projection_points)),
                             projection_points)),
-                   name = NULL) +
+        name = NULL) +
       scale_colour_manual(values = c('regression' = 'red',
                                      'projection' = 'black'),
-                            name = NULL) +
+                          name = NULL) +
       facet_wrap(vars(!!sym('region')), scales = 'free') +
       expand_limits(y = c(0, ceiling(y_max * 2) / 2)) +
       labs(x = 'per-capita GDP [1000 $/year]',
            y = 'per-capita Chemicals Value Added [$/year]') +
-      theme_minimal()
+      theme_minimal() +
+      theme(legend.position = c(1, 0),
+            legend.justification = c(1, 0),
+            legend.direction = 'horizontal')
 
     ggsave(plot = p, filename = '02_Chemicals_regression_projection.png',
            device = 'png', path = save.plots, bg = 'white',
@@ -2607,7 +2623,10 @@ calcIndustry_Value_Added <- function(subtype = 'physical',
       expand_limits(y = c(0, ceiling(y_max * 2) / 2)) +
       labs(x = 'per-capita GDP [1000 $/year]',
            y = 'per-capita Industry Value Added [1000 $/year]') +
-      theme_minimal()
+      theme_minimal() +
+      theme(legend.position = c(1, 0),
+            legend.justification = c(1, 0),
+            legend.direction = 'horizontal')
 
     ggsave(plot = p, filename = '03_Industry_regression_projection.png',
            device = 'png', path = save.plots, bg = 'white',
@@ -2746,6 +2765,7 @@ calcIndustry_Value_Added <- function(subtype = 'physical',
       scale_fill_discrete(name = NULL,
                           guide = guide_legend(direction = 'horizontal')) +
       facet_wrap(vars(!!sym('region')), scales = 'free_y') +
+      coord_cartesian(xlim = c(NA, 2100), expand = FALSE) +
       labs(x = NULL, y = 'Value Added [$tn/year]') +
       theme_minimal() +
       theme(legend.justification = c(1, 0), legend.position = c(1, 0))
