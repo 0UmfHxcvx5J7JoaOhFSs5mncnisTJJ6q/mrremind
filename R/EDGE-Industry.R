@@ -2262,12 +2262,18 @@ calcIndustry_Value_Added <- function(subtype = 'physical',
                               y = !!sym('cement.VA.pt'))) +
       geom_point(data = d_plot_region_totals,
                  mapping = aes(shape = 'region totals')) +
-      scale_shape_manual(values = c('region totals' = 'cross'),
-                         name = NULL) +
       geom_line(data = d_plot_regression,
                 mapping = aes(colour = 'regression')) +
       geom_line(data = d_plot_projections,
                 mapping = aes(colour = 'projection')) +
+      geom_point(data = d_plot_projections %>%
+                   filter(.data$year %in% projection_points),
+                 mapping = aes(shape = as.character(!!sym('year'))),
+                 size = 3) +
+      scale_shape_manual(values = c('region totals' = 'o',
+                                    setNames(rep('x', length(projection_points)),
+                                             projection_points)),
+                         name = NULL) +
       scale_colour_manual(values = c('regression' = 'red',
                                      'projection' = 'black'),
                           name = NULL,
