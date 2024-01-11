@@ -38,8 +38,8 @@
 #' @importFrom dplyr %>% case_when bind_rows between distinct first last n
 #'   mutate pull right_join select semi_join vars
 #' @importFrom Hmisc wtd.quantile
-#' @importFrom ggplot2 aes coord_cartesian expand_limits facet_wrap geom_area
-#'   geom_line geom_path geom_point ggplot ggsave guide_legend labs
+#' @importFrom ggplot2 aes coord_cartesian element_text expand_limits facet_wrap
+#'   geom_area geom_line geom_path geom_point ggplot ggsave guide_legend labs
 #'   scale_colour_manual scale_fill_discrete scale_fill_manual
 #'   scale_linetype_manual scale_shape_manual theme theme_minimal
 #' @importFrom madrat calcOutput readSource toolGetMapping
@@ -1273,7 +1273,8 @@ calcSteel_Projections <- function(subtype = 'production',
                         name = NULL) +
       coord_cartesian(xlim = c(NA, 2100), expand = FALSE) +
       theme_minimal() +
-      theme(legend.position = c(1, 0),
+      theme(text = element_text(size = 16),
+            legend.position = c(1, 0),
             legend.justification = c(1, 0))
 
     ggsave(plot = p, filename = '6_Steel_production.png',
@@ -1803,7 +1804,8 @@ calcIndustry_Value_Added <- function(subtype = 'physical',
       labs(x = 'per-capita GDP [1000$/yr]',
            y = 'specific Steel Value Added [$/t]') +
       theme_minimal() +
-      theme(legend.justification = c(1, 0),
+      theme(text = element_text(size = 16),
+            legend.justification = c(1, 0),
             legend.position = c(1, 0),
             legend.direction = 'horizontal')
 
@@ -2208,7 +2210,8 @@ calcIndustry_Value_Added <- function(subtype = 'physical',
       labs(x = 'per-capita GDP [1000 $/year]',
            y = 'per-capita Cement Production [tonnes/year]') +
       theme_minimal() +
-      theme(legend.position = c(1, 0),
+      theme(text = element_text(size = 16),
+            legend.position = c(1, 0),
             legend.justification = c(1, 0),
             legend.direction = 'horizontal')
 
@@ -2295,7 +2298,8 @@ calcIndustry_Value_Added <- function(subtype = 'physical',
       labs(x = 'per-capita GDP [1000$/yr]',
            y = 'specific Cement Value Added [$/t]') +
       theme_minimal() +
-      theme(legend.justification = c(1, 0),
+      theme(text = element_text(size = 16),
+            legend.justification = c(1, 0),
             legend.position = c(1, 0),
             legend.direction = 'horizontal')
 
@@ -2532,7 +2536,8 @@ calcIndustry_Value_Added <- function(subtype = 'physical',
       labs(x = 'per-capita GDP [1000 $/year]',
            y = 'per-capita Chemicals Value Added [$/year]') +
       theme_minimal() +
-      theme(legend.position = c(1, 0),
+      theme(text = element_text(size = 16),
+            legend.position = c(1, 0),
             legend.justification = c(1, 0),
             legend.direction = 'horizontal')
 
@@ -2624,7 +2629,8 @@ calcIndustry_Value_Added <- function(subtype = 'physical',
       labs(x = 'per-capita GDP [1000 $/year]',
            y = 'per-capita Industry Value Added [1000 $/year]') +
       theme_minimal() +
-      theme(legend.position = c(1, 0),
+      theme(text = element_text(size = 16),
+            legend.position = c(1, 0),
             legend.justification = c(1, 0),
             legend.direction = 'horizontal')
 
@@ -2768,7 +2774,8 @@ calcIndustry_Value_Added <- function(subtype = 'physical',
       coord_cartesian(xlim = c(NA, 2100), expand = FALSE) +
       labs(x = NULL, y = 'Value Added [$tn/year]') +
       theme_minimal() +
-      theme(legend.justification = c(1, 0), legend.position = c(1, 0))
+      theme(text = element_text(size = 16),
+            legend.justification = c(1, 0), legend.position = c(1, 0))
 
     ggsave(plot = p, filename = '05b_Value_Added_projection.png',
            device = 'png', path = save.plots, bg = 'white',
