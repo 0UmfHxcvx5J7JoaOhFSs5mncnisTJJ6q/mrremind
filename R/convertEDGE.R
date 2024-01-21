@@ -18,8 +18,8 @@ convertEDGE <- function(x, subtype = "FE_stationary") {
   addSSPnames <- function(x) {
     do.call("mbind", lapply(c(paste0("SSP", c(1:5, "2EU", "2_lowEn")),
                               paste0("SDP", c("", "_EI", "_RC", "_MC")),
-                              paste0("SSP2EU_NAV_", c("act", "tec", "ele", "lce", "all")),
-                              paste0("SSP2EU_CAMP_", c("weak", "strong"))),
+                              paste0("SSP2EU_ECEMF_", c("modEffInd", "IndLMD")),
+                              paste0("SSP2EU_GCS_",   c("IndLMD"))),
       function(s) setNames(x, paste(s, getNames(x), sep = "."))
     ))
   }
@@ -27,9 +27,9 @@ convertEDGE <- function(x, subtype = "FE_stationary") {
   duplScens <- function(x, scens = NULL) {
     if (is.null(scens)) {
       scens <- list(
-        gdp_SSP2EU = paste0("gdp_SSP2EU_",
-                            c("NAV_act", "NAV_ele", "NAV_tec", "NAV_lce", "NAV_all",
-                              "CAMP_weak", "CAMP_strong")),
+        gdp_SSP2EU = c(
+          paste0("gdp_SSP2EU_ECEMF_", c("modEffInd", "IndLMD")),
+          paste0("gdp_SSP2EU_GCS_",   c("IndLMD"))),
         gdp_SSP2 = "gdp_SSP2_lowEn"
       )
     }
